@@ -49,10 +49,10 @@ const head = new THREE.Group(); head.matrixAutoUpdate = false; head.visible = fa
 const bgScene = new THREE.Scene(); const bgCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 let maskTex = new THREE.DataTexture(new Uint8Array(4), 2, 2, THREE.RedFormat); maskTex.needsUpdate = true;
 const bgMat = new THREE.ShaderMaterial({
-  uniforms: { tSrc: { value: null }, tMask: { value: maskTex }, uRect: { value: new THREE.Vector4(0, 0, 1, 1) }, uDim: { value: 0 }, uAspect: { value: new THREE.Vector2(1, 1) }, uFace: { value: new THREE.Vector4(0.5, 0.5, 0.01, 0.01) }, uJaw: { value: new THREE.Vector4(0.5, 0.5, 0.001, 0.001) } },
+  uniforms: { tSrc: { value: null }, tMask: { value: maskTex }, uRect: { value: new THREE.Vector4(0, 0, 1, 1) }, uDim: { value: 0 }, uAspect: { value: new THREE.Vector2(1, 1) }, uFace: { value: new THREE.Vector4(0.5, 0.5, 0.01, 0.01) }, uJaw: { value: new THREE.Vector4(0.5, 0.5, 0.001, 0.001) }, uHead: { value: new THREE.Vector4(0.5, 0.5, 0.001, 0.001) } },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
   fragmentShader: /* glsl */`
-    uniform sampler2D tSrc; uniform sampler2D tMask; uniform vec4 uRect; uniform float uDim; uniform vec2 uAspect; uniform vec4 uFace; uniform vec4 uJaw; varying vec2 vUv;
+    uniform sampler2D tSrc; uniform sampler2D tMask; uniform vec4 uRect; uniform float uDim; uniform vec2 uAspect; uniform vec4 uFace; uniform vec4 uJaw; uniform vec4 uHead; varying vec2 vUv;
     float maskAt(vec2 uv){ return texture2D(tMask, vec2(uv.x, 1.0 - uv.y)).r; }
     void main(){
       vec2 uv = uRect.xy + vUv * uRect.zw;
@@ -62,27 +62,35 @@ const bgMat = new THREE.ShaderMaterial({
         // 마스크를 두 겹으로 넓혀서(팽창) 잔머리·가장자리의 옅은 윤곽까지 덮어요.
         float fdp = length((uv - uFace.xy) / uFace.zw);
         float faceOK = 1.0 - smoothstep(0.95, 1.25, fdp);
+        float hdp = length((uv - uHead.xy) / uHead.zw);          // 가발 두상의 화면 윤곽(타원) 기준 거리
+        float headOut = smoothstep(0.98, 1.08, hdp);              // 두상 윤곽 밖(원래 머리가 더 부풀었던 곳)
         float md = maskAt(uv), mo = 0.0;
         for (int k = 0; k < 8; k++) {
           float a = float(k) * 0.7854; vec2 d = vec2(cos(a), sin(a)) * uAspect;
           md = max(md, maskAt(uv + d * 0.01));
           mo = max(mo, maskAt(uv + d * 0.026));
         }
-        md = max(md, mo * 0.85 * (1.0 - faceOK)); // 넓은 팽창은 얼굴 밖(머리 윗부분·뒤)에서만
+        md = max(md, mo * 0.85 * max(1.0 - faceOK, headOut)); // 넓은 팽창은 얼굴 밖(머리 윗부분·뒤·두상 밖)에서만
         float m = smoothstep(0.06, 0.5, md);
         m *= smoothstep(0.85, 1.15, length((uv - uJaw.xy) / uJaw.zw)); // 수염·턱은 머리카락으로 보지 않아요
         if (m > 0.002) {
           // 주변의 '머리카락이 아닌' 색을 넓게 모아 채워요(간단한 인페인팅).
           // 얼굴 가까운 곳(관자놀이·구레나룻)은 피부색도 쓰고, 먼 곳은 배경·옷 색만 써요.
+          // 두상 윤곽 밖은 두상에서 더 먼 쪽(배경) 색만 써서, 이마 피부색이 번진 밝은 테두리가 안 생겨요.
+          // 머리카락 가장자리(역광에 밝게 빛나는 잔머리, 마스크 0.01~0.14)도 채울 색에서 빼요 → 흰 윤곽 방지.
           vec3 acc = vec3(0.0); float ws = 0.0;
           for (int ring = 1; ring <= 4; ring++) {
-            float r = float(ring) * 0.042; // 가까운 배경을 주로 써서 밝은 후광이 안 생기게
+            float r = 0.006 + float(ring * ring) * 0.0072; // 0.013·0.035·0.071·0.121 — 바로 옆 색을 주로 써서 경계에 밝은 띠·후광이 안 생기게
             for (int k = 0; k < 10; k++) {
               float a = (float(k) + float(ring) * 0.37) * 0.6283;
               vec2 o = clamp(uv + vec2(cos(a), sin(a)) * r * uAspect, 0.0, 1.0);
               float fd = length((o - uFace.xy) / uFace.zw);
               float inFace = 1.0 - smoothstep(0.95, 1.2, fd);
-              float w = (1.0 - smoothstep(0.02, 0.5, maskAt(o))) * mix(1.0, faceOK, inFace) / float(ring);
+              // 두상 밖에서는 바깥쪽 샘플만, 그리고 얼굴·귀(밝은 피부) 근처 샘플은 빼요 → 귀 위 흰 얼룩 방지
+              float outward = smoothstep(0.0, 0.1, length((o - uHead.xy) / uHead.zw) - hdp) * smoothstep(1.15, 1.45, fd);
+              float inward = smoothstep(0.0, 0.1, fdp - fd);   // 얼굴 가운데 쪽 샘플(피부)
+              float w = (1.0 - smoothstep(0.01, 0.14, maskAt(o))) * mix(1.0, faceOK, inFace)
+                      * mix(mix(1.0, inward, faceOK * 0.85), outward, headOut) / float(ring);
               acc += texture2D(tSrc, o).rgb * w; ws += w;
             }
           }
@@ -90,6 +98,9 @@ const bgMat = new THREE.ShaderMaterial({
           for (int k = 0; k < 8; k++) { float a = float(k) * 0.7854; bl += texture2D(tSrc, uv + vec2(cos(a), sin(a)) * 0.014 * uAspect).rgb; }
           bl /= 8.0;
           vec3 fill = mix(bl * 0.6, acc / max(ws, 1e-3), smoothstep(0.1, 0.6, ws));
+          // 두상 안이지만 얼굴 밖(관자놀이·귀 위·옆머리 자리)은 빛이 덜 닿는 옆면이라 조금 어둡게 → 흰 테두리 대신 그늘
+          fill *= 1.0 - 0.3 * (1.0 - faceOK) * (1.0 - headOut);
+          fill *= 1.0 - 0.12 * headOut * (1.0 - smoothstep(1.0, 1.3, hdp)); // 두상 바로 바깥은 살짝 어둡게(뒤에서 비친 밝은 후광 줄이기)
           c = mix(c, fill, m * uDim * 0.95);
         }
       }
@@ -408,8 +419,27 @@ function loop(now) {
   draw();
   renderYaw();
 }
+// 가발 두상(타원체)이 화면(영상 텍스처 좌표)에서 차지하는 타원 — 내 머리 흐림이 두상 밖에서는 배경색만 쓰게
+const SKULL_PTS = Array.from({ length: 160 }, (_, i) => {
+  const z = 1 - 2 * (i + 0.5) / 160, r = Math.sqrt(1 - z * z), a = i * 2.39996;
+  return new THREE.Vector3(HEAD.c.x + HEAD.r.x * r * Math.cos(a), HEAD.c.y + HEAD.r.y * z, HEAD.c.z + HEAD.r.z * r * Math.sin(a));
+});
+const _hv = new THREE.Vector3();
+function setHeadRegion() {
+  if (!head.visible) return;
+  head.updateMatrixWorld(true); camera.updateMatrixWorld();
+  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+  for (const p of SKULL_PTS) {
+    _hv.copy(p).applyMatrix4(wigGroup.matrixWorld).project(camera);
+    x0 = Math.min(x0, _hv.x); x1 = Math.max(x1, _hv.x); y0 = Math.min(y0, _hv.y); y1 = Math.max(y1, _hv.y);
+  }
+  const R = bgMat.uniforms.uRect.value, U = v => (v * 0.5 + 0.5);
+  const u0 = R.x + U(x0) * R.z, u1 = R.x + U(x1) * R.z, v0 = R.y + U(y0) * R.w, v1 = R.y + U(y1) * R.w;
+  bgMat.uniforms.uHead.value.set((u0 + u1) / 2, (v0 + v1) / 2, Math.max(0.001, (u1 - u0) / 2), Math.max(0.001, (v1 - v0) / 2));
+}
 function draw() {
   bgMat.uniforms.uDim.value = state.dim && !state.compare && maskData ? 1 : 0;
+  if (bgMat.uniforms.uDim.value) setHeadRegion();
   head.visible = head.visible && !!src;
   const show = head.visible && !state.compare;
   renderer.clear();
@@ -568,8 +598,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheets(
 $('#sw-debug').onchange = e => { state.debug = e.target.checked; renderUI(); renderDebug(); };
 $('#sw-mesh').onchange = e => { state.mesh = e.target.checked; renderUI(); };
 $('#fit').oninput = e => {
-  state.fit = +e.target.value / 100; $('#fit-val').textContent = e.target.value + '%';
-  head.matrix.compose(_p, _q, _s.set(1, 1, 1)); head.matrixWorldNeedsUpdate = true; dirty = true;
+  setFit(+e.target.value / 100); $('#fit-val').textContent = e.target.value + '%'; // 슬라이더가 실제 가발 크기에 반영되게
 };
 document.querySelectorAll('[data-info]').forEach(b => b.onclick = () => toast(b.dataset.info));
 
@@ -584,4 +613,12 @@ if (params.get('mode') === 'photo') { go('try'); startPhoto(params.get('src') ? 
 if (params.get('mode') === 'camera') { go('try'); startCamera(); }
 
 // 헤드리스 확인용
-window.__app = { renderer, camera, strandMat, canvas, state, startPhoto, applyStyle, STYLES, capture, setDim: v => { state.dim = v; if (v && src) runSegmentation(false); renderUI(); }, redraw: () => { dirty = true; } };
+window.__app = { renderer, camera, strandMat, canvas, state, startPhoto, applyStyle, STYLES, capture, setDim: v => { state.dim = v; if (v && src) runSegmentation(false); renderUI(); }, redraw: () => { dirty = true; }, bench };
+// 렌더 시간 재기(헤드리스 확인용): n번 그리고 1px 읽기로 GPU가 끝날 때까지 기다려 프레임당 ms를 돌려줘요.
+function bench(n = 30) {
+  const gl = renderer.getContext(), px = new Uint8Array(4);
+  draw(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) { draw(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+  return +((performance.now() - t0) / n).toFixed(2);
+}
