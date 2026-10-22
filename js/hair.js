@@ -28,9 +28,9 @@ export const STYLES = [
   {
     id: 'dandy', name: '댄디 컷', gender: 'm', seed: 11,
     rootOk: (p, phi, hy) => p.y > Math.max(hy, -3.0),
-    guides: 1400, children: 8, P: 12, step: 0.35, width: 0.08, clumpR: 0.34, tight: 0.8, frizz: 0.07, lumpy: 0.5,
-    colors: ['#241b16', '#3a2a20', '#5b4636'],
-    jitter: 0.32,
+    guides: 1400, children: 8, P: 12, step: 0.35, width: 0.08, clumpR: 0.34, tight: 0.62, frizz: 0.04, lumpy: 0.25, stray: 0.3,
+    colors: ['#241b16', '#3a2a20', '#564a43'],
+    jitter: 0.2,
     length(p, phi, rng) {
       const a = Math.abs(phi), top = smooth(6, 12, p.y);
       let L = mix(1.9, 6.6, top);
@@ -45,8 +45,8 @@ export const STYLES = [
       if (p.z > -3) d.x -= 0.5 * smooth(-3, 4, p.z) * (1 + p.x * 0.05); // 앞머리를 한쪽으로 쓸어 넘김
       return d.normalize();
     },
-    lift(p, u) { const top = smooth(4, 11, p.y); return 0.3 + u * mix(0.8, 1.5, top); },
-    gHug: 0.12,
+    lift(p, u) { const top = smooth(4, 11, p.y); return 0.3 + u * mix(0.75, 1.1, top); },
+    liftRamp: 3.2, gHug: 0.22, // 정수리는 뿌리에서 천천히 떠서 눌린 볼륨으로
     stop(p, phi, s, gr) {
       const a = Math.abs(phi);
       if (a < 58 && p.z > 1.5) return p.y < 6.4 + gr * 2.0 + Math.max(0, p.x) * 0.12;  // 앞머리: 눈썹 위, 끝을 들쭉날쭉하게
@@ -58,7 +58,7 @@ export const STYLES = [
     id: 'part', name: '가르마 컷', gender: 'm', seed: 23,
     rootOk: (p, phi, hy) => p.y > Math.max(hy, -3.0),
     guides: 1400, children: 7, P: 12, step: 0.35, width: 0.075, clumpR: 0.36, tight: 0.75, frizz: 0.12, lumpy: 0.45, jitter: 0.25,
-    colors: ['#1d1613', '#3a2a20', '#5b4636'],
+    colors: ['#1d1613', '#3a2a20', '#564a43'],
     partX: 2.4,
     length(p, phi, rng) {
       const a = Math.abs(phi), top = smooth(6.5, 11, p.y);
@@ -87,7 +87,7 @@ export const STYLES = [
   {
     id: 'long', name: '긴 생머리', gender: 'f', seed: 37,
     guides: 820, children: 9, P: 28, step: 0.5, width: 0.07, clumpR: 0.5, tight: 0.72, frizz: 0.16,
-    colors: ['#21170f', '#3b2619', '#614331'],
+    colors: ['#21170f', '#3b2619', '#564a43'],
     fall: true, fallNy: 0.32, flare: 0.07, inward: 0.12,
     length(p, phi, rng) { return 46; },
     comb(p) {
@@ -104,7 +104,7 @@ export const STYLES = [
   {
     id: 'bob', name: '단발 C컬', gender: 'f', seed: 53,
     guides: 900, children: 8, P: 18, step: 0.4, width: 0.072, clumpR: 0.42, tight: 0.7, frizz: 0.12,
-    colors: ['#2a1c14', '#4a3123', '#6e5140'],
+    colors: ['#2a1c14', '#4a3123', '#564a43'],
     fall: true, fallNy: 0.35, flare: 0.14, inward: 0.0, curl: 2.8,
     partX: -1.4,
     length(p, phi, rng) { return 30; },
@@ -222,7 +222,7 @@ export function buildWig(style) {
       const ang = rng() * Math.PI * 2, rad = clumpR * Math.sqrt(rng());
       const off = t1.clone().multiplyScalar(Math.cos(ang) * rad).addScaledVector(t2, Math.sin(ang) * rad);
       const fz = style.frizz + extraFrizz, ph = [rng() * 6.28, rng() * 6.28, rng() * 6.28], fq = 1 + rng() * 2.2;
-      const stray = rng() < 0.025 ? 1.8 + rng() * 2 : 1; // 가끔 삐져나온 잔머리
+      const stray = rng() < 0.025 ? 1 + (0.8 + rng() * 2) * (style.stray ?? 1) : 1; // 가끔 삐져나온 잔머리
       const lenK = 0.82 + rng() * 0.18;                    // 끝 길이 들쭉날쭉
       const pts = [], nrm = [];
       for (let i = 0; i < style.P; i++) {
@@ -371,7 +371,7 @@ void main(){
   float self = ao * mix(0.5, 1.0, smoothstep(-0.35, 0.45, ndl));      // 안쪽 층·아랫면 그림자
   vec3 col = base * (uAmb + diff) * self;
   float glint = 0.65 + 0.35 * sin(seed * 157.0 + t * 37.0);
-  vec3 warm = uColor * 7.0 + vec3(0.02, 0.012, 0.006);
+  vec3 warm = min(uColor * 5.0, vec3(0.35)) + vec3(0.025, 0.02, 0.016); // 밝은 색일수록 과하게 붉어지지 않게
   col += (s1 * 0.13 + s2 * 0.55 * glint * warm) * self * smoothstep(0.02, 0.2, t);
   col *= uExposure;
   float a = vCov * uOpacity;
@@ -400,20 +400,29 @@ void main(){
 }`;
 const CAP_FS = /* glsl */`
 uniform vec3 uColor; uniform vec3 uLightDir; uniform float uExposure; uniform float uAmb; uniform float uOpacity; uniform float uShadow;
+uniform float uHL[91]; uniform vec3 uC; uniform float uSkirt;
 varying float vIn; varying float vShade; varying vec3 vN; varying vec3 vP; varying float vEdge;
 float hash(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+// 헤어라인 높이를 픽셀마다 계산(2° 간격 표를 선형 보간) → 격자 계단 무늬가 안 생겨요
+float hairline(vec3 p){
+  float a = abs(degrees(atan(p.x, p.z - uC.z))) * 0.5;
+  int i = int(min(floor(a), 89.0)); float t = clamp(a - float(i), 0.0, 1.0);
+  return mix(uHL[i], uHL[i + 1], t);
+}
 void main(){
   vec3 N = normalize(vN);
+  float dy = vP.y - hairline(vP);
   float diff = clamp(dot(N, normalize(uLightDir)) * 0.5 + 0.5, 0.0, 1.0);
-  vec3 col = uColor * 0.5 * (uAmb + diff * 0.8) * (1.0 - vShade * 0.5) * uExposure;
-  // 헤어라인 쪽은 덮개를 점점 옅게 → 뿌리 사이로 피부가 비치는 느낌
+  float contact = (1.0 - smoothstep(0.0, 1.2, -dy)) * step(dy, 0.0) * 0.35;
+  float shade = min(0.85, vShade + contact) * smoothstep(-uSkirt, -uSkirt + 1.4, dy);
+  vec3 col = uColor * 0.5 * (uAmb + diff * 0.8) * (1.0 - shade * 0.5) * uExposure;
   float n = hash(floor(vP * 24.0));
-  float inside = smoothstep(0.15, 1.0, vIn);
-  inside *= mix(1.0, 0.55 + 0.45 * n, vEdge * (1.0 - smoothstep(0.7, 1.0, vIn)));
-  float a = mix(vShade * uShadow, 0.97, inside) * uOpacity;
+  float inside = smoothstep(-0.2, 0.9, dy);
+  inside = smoothstep(0.15, 1.0, inside) * mix(1.0, 0.55 + 0.45 * n, vEdge * (1.0 - smoothstep(0.7, 1.0, inside)));
+  float a = mix(shade * uShadow, 0.97, inside) * uOpacity;
   gl_FragColor = vec4(col * inside, a);
   #ifdef CAP_DEBUG
-  gl_FragColor = vec4(vIn, vShade, vEdge, 1.0);
+  gl_FragColor = vec4(inside, shade, vEdge, 1.0);
   #endif
   #include <colorspace_fragment>
 }`;
@@ -444,7 +453,7 @@ function occlusion(grid, p, n, R = 2.4) {
 export function buildCapAndShadow(wig) {
   const grid = gridOf(wig.guidePts, 2.4);
   // 1) 두피 덮개: 타원체 격자에서 헤어라인 2.4cm 아래까지만 남겨요.
-  const NU = 72, NV = 46, SKIRT = 2.4;
+  const NU = 128, NV = 72, SKIRT = 2.4;
   const verts = [], ins = [], shd = [], edg = [], nrms = [], keep = [];
   const n = V();
   for (let j = 0; j <= NV; j++) {
@@ -458,11 +467,10 @@ export function buildCapAndShadow(wig) {
       ellNormal(p, n);
       verts.push(p.x, p.y, p.z); nrms.push(n.x, n.y, n.z);
       ins.push(smooth(-0.2, 0.9, dy));
-      const contact = (1 - smooth(0, 1.2, -dy)) * (dy < 0 ? 0.35 : 0);
-      const fade = smooth(-SKIRT, -SKIRT + 1.4, dy);                 // 덮개 아래 끝은 0으로 → 경계선이 안 보이게
-      shd.push(dy < 0.5 ? Math.min(0.85, occlusion(grid, p, n) * 0.8 + contact) * fade : 0.6);
+      // 접촉 그림자·아래 끝 페이드는 셰이더에서 픽셀마다 계산해요(여기선 머리카락 가림 정도만)
+      shd.push(dy < 0.5 ? Math.min(0.85, occlusion(grid, p, n) * 0.8) : 0.6);
       edg.push(Math.abs(phi) < 80 ? 1 : 0.4);
-      keep.push(dy > -SKIRT);
+      keep.push(dy > -SKIRT - 0.6);
     }
   }
   const index = [];
@@ -507,7 +515,10 @@ export function buildCapAndShadow(wig) {
 
 export function capMaterial() {
   return new THREE.ShaderMaterial({
-    uniforms: { uColor: { value: new THREE.Color('#241b16') }, uOpacity: { value: 1 }, uShadow: { value: 0.55 }, ...LIGHT },
+    uniforms: {
+      uColor: { value: new THREE.Color('#241b16') }, uOpacity: { value: 1 }, uShadow: { value: 0.55 }, ...LIGHT,
+      uHL: { value: Array.from({ length: 91 }, (_, i) => hairlineY(i * 2)) }, uC: { value: HEAD.c.clone() }, uSkirt: { value: 2.4 },
+    },
     vertexShader: CAP_VS, fragmentShader: CAP_FS,
     side: THREE.FrontSide, transparent: true, depthWrite: true,
   });

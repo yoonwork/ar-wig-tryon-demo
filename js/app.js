@@ -21,7 +21,7 @@ const params = new URLSearchParams(location.search);
 const state = {
   mode: null, styleIdx: 0, colorIdx: 0, gender: 'm', dim: params.get('dim') !== '0', compare: false,
   debug: params.get('debug') !== '0', mesh: params.get('mesh') === '1', mirror: false,
-  photoIdx: 0, fov: 63, fit: 1, faceSeen: 0, lastFaceT: 0, yaw: 0, ready: false,
+  photoIdx: 2, fov: 63, fit: 1, faceSeen: 0, lastFaceT: 0, yaw: 0, ready: false,
 };
 window.__state = state;
 
@@ -59,33 +59,38 @@ const bgMat = new THREE.ShaderMaterial({
       if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { gl_FragColor = vec4(0.067, 0.078, 0.094, 1.0); return; }
       vec3 c = texture2D(tSrc, uv).rgb;
       if (uDim > 0.001) {
-        // 마스크를 조금 넓혀서(팽창) 머리카락 가장자리의 어두운 테두리까지 덮어요.
-        float md = maskAt(uv);
-        for (int k = 0; k < 8; k++) { float a = float(k) * 0.7854; md = max(md, maskAt(uv + vec2(cos(a), sin(a)) * 0.011 * uAspect)); }
-        float m = smoothstep(0.1, 0.55, md);
+        // 마스크를 두 겹으로 넓혀서(팽창) 잔머리·가장자리의 옅은 윤곽까지 덮어요.
+        float fdp = length((uv - uFace.xy) / uFace.zw);
+        float faceOK = 1.0 - smoothstep(0.95, 1.25, fdp);
+        float md = maskAt(uv), mo = 0.0;
+        for (int k = 0; k < 8; k++) {
+          float a = float(k) * 0.7854; vec2 d = vec2(cos(a), sin(a)) * uAspect;
+          md = max(md, maskAt(uv + d * 0.01));
+          mo = max(mo, maskAt(uv + d * 0.026));
+        }
+        md = max(md, mo * 0.85 * (1.0 - faceOK)); // 넓은 팽창은 얼굴 밖(머리 윗부분·뒤)에서만
+        float m = smoothstep(0.06, 0.5, md);
         m *= smoothstep(0.85, 1.15, length((uv - uJaw.xy) / uJaw.zw)); // 수염·턱은 머리카락으로 보지 않아요
         if (m > 0.002) {
-          // 1) 머리카락도 얼굴도 아닌 주변(배경·옷) 색을 넓게 모아 채우기 — 간단한 인페인팅
+          // 주변의 '머리카락이 아닌' 색을 넓게 모아 채워요(간단한 인페인팅).
+          // 얼굴 가까운 곳(관자놀이·구레나룻)은 피부색도 쓰고, 먼 곳은 배경·옷 색만 써요.
           vec3 acc = vec3(0.0); float ws = 0.0;
-          for (int ring = 1; ring <= 3; ring++) {
-            float r = float(ring) * 0.07;
+          for (int ring = 1; ring <= 4; ring++) {
+            float r = float(ring) * 0.042; // 가까운 배경을 주로 써서 밝은 후광이 안 생기게
             for (int k = 0; k < 10; k++) {
               float a = (float(k) + float(ring) * 0.37) * 0.6283;
               vec2 o = clamp(uv + vec2(cos(a), sin(a)) * r * uAspect, 0.0, 1.0);
               float fd = length((o - uFace.xy) / uFace.zw);
-              float w = (1.0 - smoothstep(0.04, 0.3, maskAt(o))) * smoothstep(1.0, 1.25, fd) / float(ring);
+              float inFace = 1.0 - smoothstep(0.95, 1.2, fd);
+              float w = (1.0 - smoothstep(0.02, 0.5, maskAt(o))) * mix(1.0, faceOK, inFace) / float(ring);
               acc += texture2D(tSrc, o).rgb * w; ws += w;
             }
           }
-          // 2) 흐리고 어둡게 만든 내 머리카락 (얼굴 가까이에서 씀)
           vec3 bl = vec3(0.0);
           for (int k = 0; k < 8; k++) { float a = float(k) * 0.7854; bl += texture2D(tSrc, uv + vec2(cos(a), sin(a)) * 0.014 * uAspect).rgb; }
           bl /= 8.0;
-          vec3 dark = bl * 0.5;
-          vec3 target = mix(dark, acc / max(ws, 1e-3), smoothstep(0.15, 0.7, ws) * 0.92);
-          float near = 1.0 - smoothstep(1.0, 1.3, length((uv - uFace.xy) / uFace.zw));
-          target = mix(target, dark, near);
-          c = mix(c, target, m * uDim * 0.92);
+          vec3 fill = mix(bl * 0.6, acc / max(ws, 1e-3), smoothstep(0.1, 0.6, ws));
+          c = mix(c, fill, m * uDim * 0.95);
         }
       }
       gl_FragColor = vec4(c, 1.0);
@@ -263,14 +268,31 @@ function estimateLight(lm) {
 const segCanvas = document.createElement('canvas');
 const segCtx = segCanvas.getContext('2d', { willReadFrequently: false });
 let maskData = null;
+let blurTmp = null;
+// 마스크를 가로·세로로 한 번씩 부드럽게(상자 흐림) → 가장자리 계단 무늬가 안 생겨요.
+function boxBlur(f, w, h, r) {
+  if (!blurTmp || blurTmp.length !== f.length) blurTmp = new Float32Array(f.length);
+  const t = blurTmp, k = 1 / (2 * r + 1);
+  for (let y = 0; y < h; y++) {
+    const o = y * w; let acc = 0;
+    for (let x = -r; x <= r; x++) acc += f[o + Math.min(w - 1, Math.max(0, x))];
+    for (let x = 0; x < w; x++) { t[o + x] = acc * k; acc += f[o + Math.min(w - 1, x + r + 1)] - f[o + Math.max(0, x - r)]; }
+  }
+  for (let x = 0; x < w; x++) {
+    let acc = 0;
+    for (let y = -r; y <= r; y++) acc += t[Math.min(h - 1, Math.max(0, y)) * w + x];
+    for (let y = 0; y < h; y++) { f[y * w + x] = acc * k; acc += t[Math.min(h - 1, y + r + 1) * w + x] - t[Math.max(0, y - r) * w + x]; }
+  }
+}
 function runSegmentation(blend) {
   const t0 = performance.now();
-  const w = 320, h = Math.max(4, Math.round(320 * src.h / src.w));
+  const w = state.mode === 'photo' ? 512 : 320, h = Math.max(4, Math.round(w * src.h / src.w));
   if (segCanvas.width !== w || segCanvas.height !== h) { segCanvas.width = w; segCanvas.height = h; }
   segCtx.drawImage(src.el, 0, 0, w, h);
   segmenter.segment(segCanvas, res => {
     const m = res.confidenceMasks[res.confidenceMasks.length - 1];
-    const f = m.getAsFloat32Array();
+    const f = m.getAsFloat32Array().slice();
+    boxBlur(f, w, h, Math.round(w / 160));
     if (!maskData || maskData.length !== w * h || maskTex.image.width !== w) {
       maskData = new Uint8Array(w * h);
       maskTex.dispose();
@@ -511,9 +533,9 @@ const THUMBS = {
 
 // ── 이벤트 ───────────────────────────────────────────────
 $('#btn-camera').onclick = () => { go('try'); startCamera(); };
-$('#btn-photo').onclick = () => { go('try'); startPhoto(0); };
+$('#btn-photo').onclick = () => { go('try'); startPhoto(state.photoIdx >= 0 ? state.photoIdx : 2); };
 $('#btn-back').onclick = () => { stopCamera(); src = null; head.visible = false; state.mode = null; go('start'); };
-$('#btn-error-photo').onclick = () => startPhoto(0);
+$('#btn-error-photo').onclick = () => startPhoto(2);
 $('#btn-error-retry').onclick = () => startCamera();
 document.querySelectorAll('[data-gender]').forEach(b => b.onclick = () => {
   state.gender = b.dataset.gender;
@@ -552,13 +574,13 @@ $('#fit').oninput = e => {
 document.querySelectorAll('[data-info]').forEach(b => b.onclick = () => toast(b.dataset.info));
 
 // 처음 상태
-state.styleIdx = Math.max(0, STYLES.findIndex(s => s.id === (params.get('wig') || 'dandy')));
+state.styleIdx = Math.max(0, STYLES.findIndex(s => s.id === (params.get('wig') || 'long')));
 state.gender = STYLES[state.styleIdx].gender;
 state.colorIdx = Math.min(2, +(params.get('color') || 0));
 if (params.get('fit')) { setFit(+params.get('fit') / 100); $('#fit').value = params.get('fit'); $('#fit-val').textContent = params.get('fit') + '%'; }
 applyStyle();
 go('start');
-if (params.get('mode') === 'photo') { go('try'); startPhoto(params.get('src') ? -2 : +(params.get('photo') || 0)); }
+if (params.get('mode') === 'photo') { go('try'); startPhoto(params.get('src') ? -2 : +(params.get('photo') ?? 2)); }
 if (params.get('mode') === 'camera') { go('try'); startCamera(); }
 
 // 헤드리스 확인용
