@@ -33,13 +33,20 @@ svg{display:block}
 .ico{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 
 /* 휴대폰 틀: PC에서는 가운데 390×844, 휴대폰에서는 꽉 차게 */
-.page{min-height:100%;display:flex;align-items:center;justify-content:center;gap:40px;padding:24px}
-.phone{position:relative;width:390px;height:min(844px,calc(100dvh - 48px));background:var(--card);border-radius:36px;overflow:hidden;border:1px solid var(--line);box-shadow:var(--sh-pop);display:flex;flex-direction:column}
-.side-note{width:280px;color:var(--ink-2);font-size:14px}
-.side-note h2{font-size:17px;margin:0 0 8px;color:var(--ink)}
+.page{min-height:100%;display:flex;align-items:center;justify-content:center;gap:72px;padding:24px}
+.phone{position:relative;container-type:size;width:390px;height:min(844px,calc(100dvh - 48px));background:var(--card);border-radius:36px;overflow:hidden;border:1px solid var(--line);box-shadow:var(--sh-pop);display:flex;flex-direction:column}
+.side-note{width:340px;color:var(--ink-2);font-size:15px;word-break:keep-all}
+.side-note h2{font-size:32px;line-height:1.25;letter-spacing:-.02em;margin:0 0 12px;color:var(--ink)}
 .side-note p{margin:0 0 12px}
+.side-steps{list-style:none;margin:24px 0;padding:0;border-top:1px solid var(--line)}
+.side-steps li{display:flex;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
+.side-steps .ico{flex:none;margin-top:1px;color:var(--ink)}
+.side-steps b{display:block;color:var(--ink);font-size:15px;font-weight:600}
+.side-steps span{display:block;font-size:14px;color:var(--mut);line-height:1.5}
+.side-note .small{font-size:13px;color:var(--mut)}
 .side-note .k{display:inline-block;padding:0 8px;border-radius:var(--r-pill);background:var(--track);font-size:13px;color:var(--ink-2)}
-@media (max-width:760px){.side-note{display:none}}
+.side-note kbd{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 4px;border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;background:#fff;font:600 12px var(--font);color:var(--ink)}
+@media (max-width:860px){.side-note{display:none}}
 @media (max-width:500px){.page{padding:0;display:block}.phone{width:100%;height:100dvh;border-radius:0;border:0;box-shadow:none}}
 
 .demo-band{flex:none;height:24px;display:flex;align-items:center;justify-content:center;background:var(--ink);color:#fff;font-size:12px;font-weight:600;letter-spacing:.02em}
@@ -53,8 +60,24 @@ svg{display:block}
 .logo small{font-weight:500;font-size:13px;color:var(--mut)}
 .icon-btn{width:44px;height:44px;border-radius:var(--r-pill);display:grid;place-items:center;color:var(--ink-2)}
 .icon-btn:hover{background:var(--soft)}
-h1{font-size:32px;line-height:1.3;margin:24px 0 8px;letter-spacing:-.02em}
-.lead{color:var(--ink-2);margin:0 0 24px;font-size:15px}
+h1{font-size:30px;line-height:1.25;margin:16px 0 8px;letter-spacing:-.03em}
+.lead{color:var(--ink-2);margin:0 0 16px;font-size:15px;word-break:keep-all}
+/* 시작 화면 3D 미리보기 */
+.hero{position:relative;height:clamp(300px,54vh,460px);height:clamp(280px,calc(100cqh - 400px),460px);border-radius:var(--r-xl);background:var(--track);overflow:hidden;margin:0 0 16px;isolation:isolate}
+#hero-gl{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:pan-y;cursor:grab;animation:fade-in .6s ease both}
+#hero-gl.grabbing{cursor:grabbing}
+@keyframes fade-in{from{opacity:0}}
+.hero-top{position:absolute;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;pointer-events:none}
+.hero-meta{height:28px;display:flex;align-items:center;padding:0 10px;border-radius:var(--r-pill);background:rgba(255,255,255,.8);font-size:12px;font-weight:600;color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.hero .yaw{min-width:112px;padding:5px 12px 7px}
+.hero .yaw-track{width:84px}
+.hero-hint{position:absolute;left:50%;bottom:72px;transform:translateX(-50%);display:flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:var(--r-pill);background:rgba(25,31,40,.72);color:#fff;font-size:13px;font-weight:600;white-space:nowrap;pointer-events:none;transition:opacity .4s}
+.hero-hint .ico{width:18px;height:18px}
+.hero-hint.used{opacity:0}
+.hero-chips{position:absolute;left:0;right:0;bottom:0;display:flex;gap:6px;padding:12px;overflow-x:auto;scrollbar-width:none}
+.hero-chips::-webkit-scrollbar{display:none}
+.hero-chip{flex:none;height:44px;padding:0 14px;border-radius:var(--r-pill);background:#fff;font-size:14px;font-weight:600;color:var(--ink-2);box-shadow:var(--sh-pill);white-space:nowrap}
+.hero-chip[aria-pressed="true"]{background:var(--ink);color:#fff}
 .checks{border:1px solid var(--line-2);border-radius:var(--r-lg);padding:4px 16px;margin-bottom:12px}
 .checks h2{font-size:13px;font-weight:600;color:var(--mut);margin:12px 0 0}
 .check{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--line-2)}
@@ -74,10 +97,16 @@ h1{font-size:32px;line-height:1.3;margin:24px 0 8px;letter-spacing:-.02em}
 .btn-ghost:hover{color:var(--ink)}
 .btn-line{background:var(--card);border:1px solid var(--line);color:var(--ink)}
 .btn-line:hover{background:var(--soft)}
+/* 눌렀을 때 바로 반응(살짝 작아짐) */
+.btn,.glass-btn,.tool,.photo-pick,.hero-chip,.icon-btn,.seg button,.upload span,.row-btn{transition:transform .12s ease,background-color .15s,color .15s}
+.btn:active,.glass-btn:active,.tool:active,.photo-pick:active,.hero-chip:active,.icon-btn:active,.upload:active span{transform:scale(.96)}
+.wig-thumb,.swatch::before{transition:transform .12s ease,border-color .15s,background-color .15s}
+.wig:active .wig-thumb,.swatch:active::before{transform:scale(.92)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
 /* 체험 화면 */
 #scr-try{background:#111418}
-#stage{position:absolute;inset:0;overflow:hidden}
+#stage{position:absolute;inset:0;overflow:hidden;touch-action:none}
 #gl{width:100%;height:100%;display:block}
 #gl.mirror{transform:scaleX(-1)}
 .topbar{position:absolute;top:8px;left:8px;right:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;z-index:3}
@@ -94,10 +123,16 @@ h1{font-size:32px;line-height:1.3;margin:24px 0 8px;letter-spacing:-.02em}
 .tool{display:flex;align-items:center;gap:6px;height:40px;padding:0 14px 0 10px;border-radius:var(--r-pill);background:rgba(255,255,255,.92);font-size:13px;font-weight:600;color:var(--ink);box-shadow:var(--sh-pill);min-width:44px}
 .tool .ico{width:20px;height:20px}
 .tool[aria-pressed="true"]{background:var(--brand);color:#fff}
-.debug{position:absolute;left:8px;top:64px;z-index:3;font:500 11px/1.45 var(--mono);color:#fff;background:rgba(17,20,24,.62);padding:6px 8px;border-radius:var(--r-sm);font-variant-numeric:tabular-nums}
+.debug{position:absolute;left:8px;top:64px;z-index:3;height:28px;display:flex;align-items:center;padding:0 10px;border-radius:var(--r-pill);font-size:12px;font-weight:600;color:#fff;background:rgba(17,20,24,.55);font-variant-numeric:tabular-nums;white-space:nowrap}
 .credit{margin:4px 0 0;font-size:12px;color:var(--mut)}
 .credit a{color:var(--ink-2)}
-.hint{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(var(--sheet-h,236px) + 96px);z-index:3;background:rgba(17,20,24,.72);color:#fff;font-size:14px;font-weight:600;padding:8px 16px;border-radius:var(--r-pill);white-space:nowrap}
+.hint,.coach{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(var(--sheet-h,236px) + 96px);z-index:3;background:rgba(17,20,24,.72);color:#fff;font-size:14px;font-weight:600;padding:8px 16px;border-radius:var(--r-pill);white-space:nowrap}
+.coach{display:flex;align-items:center;gap:8px;animation:coach 3.8s ease both;pointer-events:none}
+.coach .ico{width:18px;height:18px}
+@keyframes coach{0%{opacity:0;transform:translate(-50%,6px)}8%,85%{opacity:1;transform:translate(-50%,0)}100%{opacity:0}}
+.flash{position:absolute;inset:0;z-index:7;background:#fff;opacity:0;pointer-events:none}
+.flash.on{animation:flash .32s ease-out}
+@keyframes flash{0%{opacity:.85}100%{opacity:0}}
 .shutter{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(var(--sheet-h,236px) + 16px);z-index:3;width:68px;height:68px;border-radius:50%;background:#fff;box-shadow:0 0 0 4px rgba(255,255,255,.5),var(--sh-pop);display:grid;place-items:center}
 .shutter::after{content:"";width:54px;height:54px;border-radius:50%;border:2px solid var(--ink)}
 .shutter:active{transform:translateX(-50%) scale(.95)}
@@ -131,20 +166,30 @@ h1{font-size:32px;line-height:1.3;margin:24px 0 8px;letter-spacing:-.02em}
 .overlay{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(17,20,24,.78);color:#fff;text-align:center;padding:24px}
 .spinner{width:36px;height:36px;border-radius:50%;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;animation:spin .9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.overlay b{font-size:17px} .overlay span{font-size:13px;color:rgba(255,255,255,.75)}
+.overlay b{font-size:17px} .overlay span{font-size:13px;color:rgba(255,255,255,.75);font-variant-numeric:tabular-nums}
+.progress{width:200px;height:4px;border-radius:2px;background:rgba(255,255,255,.22);overflow:hidden}
+.progress i{display:block;height:100%;background:#fff;transform-origin:left;transform:scaleX(.02);transition:transform .2s linear}
 .err-card{background:#fff;color:var(--ink);border-radius:var(--r-lg);padding:20px;max-width:320px;text-align:left}
 .err-card b{display:flex;align-items:center;gap:8px;font-size:17px;color:var(--bad)}
+.err-card b span{font-size:inherit;color:inherit}
 .err-card p{margin:8px 0 16px;font-size:14px;color:var(--ink-2)}
 .err-card .btn{height:48px;font-size:15px}
 .err-card .btn + .btn{margin-top:8px}
-.toast{position:absolute;left:50%;top:64px;transform:translateX(-50%);z-index:8;background:var(--ink);color:#fff;font-size:14px;font-weight:600;padding:10px 16px;border-radius:var(--r-pill);white-space:nowrap;box-shadow:var(--sh-pop)}
+.toast{position:absolute;left:50%;top:64px;transform:translateX(-50%);z-index:8;background:var(--ink);color:#fff;font-size:14px;font-weight:600;padding:10px 16px;border-radius:var(--r-pill);white-space:nowrap;box-shadow:var(--sh-pop);animation:toast-in .2s ease-out}
+.phone[data-screen="try"] .toast{top:auto;bottom:calc(var(--sheet-h,236px) + 100px)}
+.phone[data-screen="result"] .toast{top:auto;bottom:96px}
+@keyframes toast-in{from{opacity:0;transform:translate(-50%,6px)}}
 
 /* 촬영 결과 */
 #scr-result{background:var(--bg)}
 .result-top{display:flex;align-items:center;gap:4px;height:56px;padding:0 8px;background:var(--card);border-bottom:1px solid var(--line-2)}
 .result-top b{font-size:17px}
-.result-img{flex:1;min-height:0;display:grid;place-items:center;padding:16px}
-.result-img img{max-width:100%;max-height:100%;border-radius:var(--r-lg);box-shadow:var(--sh-pop);background:#111}
+.result-meta{display:flex;flex-wrap:wrap;gap:6px;padding:12px 16px 0}
+.result-meta span{height:28px;display:flex;align-items:center;padding:0 10px;border-radius:var(--r-pill);background:var(--card);border:1px solid var(--line-2);font-size:13px;font-weight:600;color:var(--ink-2)}
+.result-meta span:first-child{background:var(--ink);border-color:var(--ink);color:#fff}
+.result-img{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:12px 16px 16px}
+.result-img img{min-width:0;min-height:0;max-width:100%;max-height:100%;border-radius:var(--r-lg);box-shadow:var(--sh-pop);background:#111;animation:pop .36s cubic-bezier(.2,.8,.2,1) both}
+@keyframes pop{from{opacity:0;transform:translateY(16px) scale(.97)}}
 .result-actions{display:flex;gap:8px;padding:12px 16px calc(16px + env(safe-area-inset-bottom));background:var(--card);border-top:1px solid var(--line-2)}
 .result-actions .btn{flex:1}
 .result-actions .btn-line{flex:0 0 132px}
@@ -186,9 +231,14 @@ h1{font-size:32px;line-height:1.3;margin:24px 0 8px;letter-spacing:-.02em}
 <body>
 <div class="page">
   <aside class="side-note" aria-label="데모 설명">
-    <h2>브라우저 AR 가발 데모</h2>
+    <h2>앱 설치 없이<br>브라우저에서 바로<br>써 보는 3D 가발</h2>
     <p>휴대폰으로 열면 전면 카메라로, PC에서는 웹캠이나 예시 사진으로 체험할 수 있어요.</p>
-    <p>실제 앱은 Flutter와 상용 AR SDK로 만들고, 이 데모의 방식(얼굴 가림막, 결 방향 반사, 내 머리 흐림)을 SDK 위에서 다시 맞춰요.</p>
+    <ul class="side-steps">
+      <li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 8 8"/><path d="M12 12l6-6M15 6h3v3"/></svg><div><b>고개를 좌우로 천천히 돌려 보세요</b><span>위쪽 각도 숫자와 함께 옆머리·귀 쪽이 들뜨는지 볼 수 있어요</span></div></li>
+      <li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19c0-8 2-13 6-15 4 2 6 7 6 15"/><path d="M4 21h16"/><path d="M9 14h6M8.5 10h7" stroke-dasharray="1.5 2"/></svg><div><b>'내 머리 흐림'을 켰다 꺼 보세요</b><span>가발 밖으로 보이는 원래 머리카락이 흐려져요</span></div></li>
+      <li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20c0-9 2-14 7-16M9 20c0-7 1.5-11 5-13M13 20c0-5 1-8 4-10M17 20c0-3 .6-5 2-6"/></svg><div><b>고개를 위아래로 기울여 보세요</b><span>머리결 방향을 따라 윤기가 움직여요</span></div></li>
+    </ul>
+    <p class="small">체험 화면에서 <kbd>←</kbd> <kbd>→</kbd> 키나 화면 밀기로 가발을 바꿔요. 실제 앱은 Flutter와 상용 AR SDK로 만들고, 이 데모의 방식(얼굴 가림막, 결 방향 반사, 내 머리 흐림)을 SDK 위에서 다시 맞춰요.</p>
     <p><span class="k">카메라 영상은 기기 밖으로 나가지 않아요</span></p>
   </aside>
 
@@ -204,6 +254,18 @@ h1{font-size:32px;line-height:1.3;margin:24px 0 8px;letter-spacing:-.02em}
         </div>
         <h1>가발, 써 보고<br>고르세요</h1>
         <p class="lead">카메라에 얼굴을 비추면 가발이 머리 모양에 맞춰 바로 씌워져요. 고개를 돌려도 따라와요.</p>
+        <div class="hero" id="hero">
+          <canvas id="hero-gl" role="img" aria-label="마네킹에 씌운 3D 가발 미리보기. 좌우로 끌어서 돌려 볼 수 있어요."></canvas>
+          <div class="hero-top">
+            <div class="yaw" id="hero-yaw" aria-hidden="true">
+              <span class="yaw-text" id="hero-yaw-text">정면 0°</span>
+              <span class="yaw-track"><i style="left:7%"></i><i style="left:50%"></i><i style="left:93%"></i><span class="yaw-dot" id="hero-yaw-dot" style="left:50%"></span></span>
+            </div>
+            <span class="hero-meta" id="hero-meta">실시간 3D</span>
+          </div>
+          <span class="hero-hint" id="hero-hint"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7l-4 4 4 4"/><path d="M16 7l4 4-4 4"/><path d="M4 11h16"/></svg>끌어서 돌려 보기</span>
+          <div class="hero-chips" id="hero-chips" role="group" aria-label="미리 볼 가발"></div>
+        </div>
         <div class="checks">
           <h2>이 데모에서 확인할 것</h2>
           <div class="check"><svg class="ico" viewBox="0 0 24 24"><path d="M5 20c0-9 2-14 7-16M9 20c0-7 1.5-11 5-13M13 20c0-5 1-8 4-10M17 20c0-3 .6-5 2-6"/></svg><div><b>질감과 볼륨</b><span>가닥마다 결 방향 윤기, 어두운 뿌리와 옅은 끝</span></div></div>
@@ -237,11 +299,13 @@ h1{font-size:32px;line-height:1.3;margin:24px 0 8px;letter-spacing:-.02em}
         </div>
       </div>
       <div class="debug" id="debug">- fps</div>
+      <div class="flash" id="flash" aria-hidden="true"></div>
       <div class="tools">
         <button class="tool" id="btn-dim" type="button" aria-pressed="false"><svg class="ico" viewBox="0 0 24 24"><path d="M6 19c0-8 2-13 6-15 4 2 6 7 6 15"/><path d="M4 21h16" /><path d="M9 14h6M8.5 10h7" stroke-dasharray="1.5 2"/></svg>내 머리 흐림</button>
         <button class="tool" id="btn-compare" type="button" aria-pressed="false"><svg class="ico" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 4v16"/></svg>누르면 원래 모습</button>
       </div>
-            <div class="hint" id="hint" hidden>얼굴을 화면 가운데에 맞춰 주세요</div>
+      <div class="hint" id="hint" hidden>얼굴을 화면 가운데에 맞춰 주세요</div>
+      <div class="coach" id="coach" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7l-4 4 4 4"/><path d="M16 7l4 4-4 4"/><path d="M4 11h16"/></svg>화면을 좌우로 밀면 가발이 바뀌어요</div>
       <button class="shutter" id="shutter" type="button" aria-label="사진 찍기"></button>
       <div class="sheet" id="sheet">
         <div class="sheet-row">
@@ -266,10 +330,10 @@ h1{font-size:32px;line-height:1.3;margin:24px 0 8px;letter-spacing:-.02em}
         </div>
         <p class="credit" id="credit" hidden></p>
       </div>
-      <div class="overlay" id="loading" hidden><div class="spinner" aria-hidden="true"></div><b id="loading-title">불러오는 중</b><span id="loading-sub"></span></div>
+      <div class="overlay" id="loading" hidden role="status" aria-live="polite"><div class="spinner" id="loading-spin" aria-hidden="true"></div><b id="loading-title">불러오는 중</b><div class="progress" id="loading-prog" hidden><i id="loading-bar"></i></div><span id="loading-sub"></span></div>
       <div class="overlay" id="error" hidden>
         <div class="err-card" role="alert">
-          <b><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.4v.1"/></svg>카메라를 쓸 수 없어요</b>
+          <b><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.4v.1"/></svg><span id="error-title">카메라를 쓸 수 없어요</span></b>
           <p id="error-msg"></p>
           <button class="btn btn-primary" id="btn-error-photo" type="button">사진으로 해 보기</button>
           <button class="btn btn-line" id="btn-error-retry" type="button">카메라 다시 켜기</button>
@@ -283,6 +347,7 @@ h1{font-size:32px;line-height:1.3;margin:24px 0 8px;letter-spacing:-.02em}
         <button class="icon-btn" id="btn-result-back" type="button" aria-label="체험으로 돌아가기"><svg class="ico" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
         <b>촬영 결과</b>
       </div>
+      <div class="result-meta" id="shot-meta"></div>
       <div class="result-img"><img id="shot-img" alt="가발을 쓴 촬영 결과"></div>
       <div class="result-actions">
         <button class="btn btn-line" id="btn-retake" type="button">다시 찍기</button>
@@ -303,7 +368,7 @@ h1{font-size:32px;line-height:1.3;margin:24px 0 8px;letter-spacing:-.02em}
         <label class="row fit-row"><span>가발 크기 맞춤<small>머리가 크거나 작으면 조절해요</small></span><span class="fit"><input type="range" id="fit" min="92" max="112" step="1" value="100" aria-label="가발 크기"><span class="val" id="fit-val">100%</span></span></label>
         <button class="row row-btn" type="button" data-info="제안용 데모라 실제 약관은 아직 없어요">이용약관<span class="val">준비 중</span></button>
         <button class="row row-btn" type="button" data-info="카메라 영상과 사진은 이 기기 안에서만 처리해요">개인정보 처리방침<span class="val">요약 보기</span></button>
-        <div class="row"><span>버전</span><span class="val">0.1.0 (제안용 데모)</span></div>
+        <div class="row"><span>버전</span><span class="val">0.2.0 (제안용 데모)</span></div>
         <button class="btn btn-line close-btn" type="button" data-close>닫기</button>
       </div>
     </div>

@@ -4,6 +4,14 @@ import { FilesetResolver, FaceLandmarker, ImageSegmenter } from 'tasks-vision';
 import { OneEuro } from './filter.js';
 import { buildOccluder, HEAD } from './head.js';
 import { STYLES, buildWig, buildCapAndShadow, strandMaterial, capMaterial, faceShadowMaterial, LIGHT } from './hair.js';
+import { createHero } from './hero.js';
+
+// MediaPipe(wasm)는 정상 동작 중에도 내부 로그("INFO: Created TensorFlow Lite XNNPACK delegate", "W1022 …")를
+// console.error·warn으로 내보내요. 오류처럼 보이지 않게 이 두 형식만 걸러요(진짜 오류 E… 줄은 그대로 보여요).
+for (const k of ['error', 'warn', 'info', 'log']) {
+  const orig = console[k].bind(console);
+  console[k] = (...a) => { if (typeof a[0] === 'string' && /^(INFO: Created TensorFlow Lite|[IW]\d{4} \d\d:\d\d:\d\d)/.test(a[0])) return; orig(...a); };
+}
 
 const MP_VER = '0.10.35';
 const WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/wasm`;
@@ -21,9 +29,13 @@ const params = new URLSearchParams(location.search);
 const state = {
   mode: null, styleIdx: 0, colorIdx: 0, gender: 'm', dim: params.get('dim') !== '0', compare: false,
   debug: params.get('debug') !== '0', mesh: params.get('mesh') === '1', mirror: false,
-  photoIdx: 2, fov: 63, fit: 1, faceSeen: 0, lastFaceT: 0, yaw: 0, ready: false,
+  photoIdx: 2, photoPicked: params.has('photo'), fov: 63, fit: 1, faceSeen: 0, lastFaceT: 0, yaw: 0, ready: false,
 };
 window.__state = state;
+const COLOR_NAMES = ['자연 흑갈색', '다크 브라운', '애쉬 브라운'];
+// 뒤로 가기·다른 입력으로 바꾸면 1 늘려요. 카메라 권한 창이나 사진 받기를 기다리던 작업이 끝났을 때
+// 이미 다른 화면이면 결과를 버려요(뒤로 간 뒤에 카메라가 켜진 채로 남지 않게).
+let runId = 0;
 
 // ── 렌더러와 장면 ─────────────────────────────────────────
 const stage = $('#stage');
@@ -143,15 +155,33 @@ function wigFor(style) {
   }
   return wigCache.get(style.id);
 }
-function applyStyle() {
+function applyStyle({ grow = false } = {}) {
   const style = STYLES[state.styleIdx];
   const w = wigFor(style);
+  const changed = hairMesh.geometry !== w.wig.geo;
   hairMesh.geometry = w.wig.geo; capMesh.geometry = w.capGeo; shadowMesh.geometry = w.faceShadowGeo;
   const col = new THREE.Color(style.colors[state.colorIdx] || style.colors[0]);
   strandMat.uniforms.uColor.value.copy(col); capMat.uniforms.uColor.value.copy(col);
   strandMat.uniforms.uWidth.value = style.width;
   state.strands = w.wig.strandCount; state.buildMs = Math.round(w.wig.ms);
+  if (grow && changed) startGrow();
+  if (hero) { hero.setStyle(style, style.colors[state.colorIdx] || style.colors[0]); renderHeroUI(); }
   renderUI(); dirty = true;
+}
+// 가발이 처음 보이거나 바뀔 때: 뿌리에서 끝으로 머리카락이 흘러내리며 나타나요(약 0.7초).
+let growT0 = -1;
+function startGrow() {
+  growT0 = performance.now();
+  strandMat.uniforms.uGrow.value = 0; capMat.uniforms.uOpacity.value = 0; shadowMat.uniforms.uOpacity.value = 0; dirty = true;
+}
+function stepGrow(done = false) {
+  if (growT0 < 0) return;
+  // rAF 시각은 긴 작업(모델 준비) 직후 실제보다 늦을 수 있어서 performance.now()로 재요
+  const k = done ? 1 : Math.min(1, Math.max(0, (performance.now() - growT0) / 700)), e = 1 - Math.pow(1 - k, 3);
+  strandMat.uniforms.uGrow.value = 0.02 + e * 1.15;
+  capMat.uniforms.uOpacity.value = shadowMat.uniforms.uOpacity.value = Math.min(1, e * 2.2);
+  if (k >= 1) { growT0 = -1; strandMat.uniforms.uGrow.value = 2; }
+  dirty = true;
 }
 
 // ── 화면 크기·자르기 ──────────────────────────────────────
@@ -191,28 +221,62 @@ function layout() {
   dirty = true;
 }
 new ResizeObserver(() => layout()).observe(stage);
-new ResizeObserver(() => { $('#scr-try').style.setProperty('--sheet-h', $('#sheet').offsetHeight + 'px'); }).observe($('#sheet'));
+new ResizeObserver(() => { const h = $('#sheet').offsetHeight; if (h) $('.phone').style.setProperty('--sheet-h', h + 'px'); }).observe($('#sheet'));
 
 // ── MediaPipe ─────────────────────────────────────────────
 let landmarker = null, segmenter = null, mpMode = null, mpLoading = null;
+// 받을 파일 크기(압축 풀린 크기, 2026-10 확인). 받는 동안 진행 막대에 실제 받은 양을 보여 줘요.
+const SIZES = { 'vision_wasm_internal.wasm': 11153617, face: 3758596, hair: 781618 };
+async function fetchBytes(url, onBytes) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + url);
+  if (!res.body?.getReader) { const b = new Uint8Array(await res.arrayBuffer()); onBytes(b.length); return b; }
+  const reader = res.body.getReader(), parts = []; let n = 0;
+  for (;;) { const { done, value } = await reader.read(); if (done) break; parts.push(value); n += value.length; onBytes(value.length); }
+  const out = new Uint8Array(n); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
 async function loadModels() {
   if (mpLoading) return mpLoading;
   mpLoading = (async () => {
-    setLoading(true, 'AI 모델을 불러오고 있어요', '처음 한 번만 받아요 (약 16MB)');
+    setLoading(true, 'AI 모델을 받고 있어요', '처음 한 번만 받아요');
     const fileset = await FilesetResolver.forVisionTasks(WASM_URL);
+    // AI 엔진(wasm)과 모델 2개를 직접 받아 진행률을 보여 줘요. 실패하면 원래 방식(주소로 바로 불러오기)으로 해요.
+    let face = { modelAssetPath: FACE_MODEL }, hair = { modelAssetPath: HAIR_MODEL };
+    const origWasm = fileset.wasmBinaryPath;
+    try {
+      const wasmName = String(fileset.wasmBinaryPath).split('/').pop();
+      const total = (SIZES[wasmName] || 11e6) + SIZES.face + SIZES.hair;
+      let got = 0;
+      const tick = b => { got += b; setProgress(got / total, got, total); };
+      setProgress(0, 0, total);
+      const [wasm, fb, hb] = await Promise.all([fetchBytes(fileset.wasmBinaryPath, tick), fetchBytes(FACE_MODEL, tick), fetchBytes(HAIR_MODEL, tick)]);
+      fileset.wasmBinaryPath = URL.createObjectURL(new Blob([wasm], { type: 'application/wasm' }));
+      face = { modelAssetBuffer: fb }; hair = { modelAssetBuffer: hb };
+    } catch (e) { console.warn('진행률 받기 실패, 기본 방식으로 불러와요', e); }
+    setLoading(true, 'AI 모델을 준비하고 있어요', '거의 다 됐어요');
     const make = async (delegate) => {
       const lm = await FaceLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: FACE_MODEL, delegate }, runningMode: 'VIDEO', numFaces: 1,
+        baseOptions: { ...(face.modelAssetBuffer ? { modelAssetBuffer: face.modelAssetBuffer.slice() } : face), delegate }, runningMode: 'VIDEO', numFaces: 1,
         outputFacialTransformationMatrixes: true, outputFaceBlendshapes: false,
         minFaceDetectionConfidence: 0.5, minFacePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
       });
       const sg = await ImageSegmenter.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: HAIR_MODEL, delegate }, runningMode: 'IMAGE', outputCategoryMask: false, outputConfidenceMasks: true,
+        baseOptions: { ...(hair.modelAssetBuffer ? { modelAssetBuffer: hair.modelAssetBuffer.slice() } : hair), delegate }, runningMode: 'IMAGE', outputCategoryMask: false, outputConfidenceMasks: true,
       });
       return [lm, sg];
     };
-    try { [landmarker, segmenter] = await make('GPU'); state.delegate = 'GPU'; }
-    catch (e) { console.warn('GPU 위임 실패, CPU로 전환', e); [landmarker, segmenter] = await make('CPU'); state.delegate = 'CPU'; }
+    const attempt = async () => {
+      try { [landmarker, segmenter] = await make('GPU'); state.delegate = 'GPU'; }
+      catch (e) { console.warn('GPU 위임 실패, CPU로 전환', e); [landmarker, segmenter] = await make('CPU'); state.delegate = 'CPU'; }
+    };
+    try { await attempt(); }
+    catch (e) {
+      if (fileset.wasmBinaryPath === origWasm) throw e;
+      console.warn('받아 둔 파일로 준비 실패, 주소로 다시 불러와요', e);
+      fileset.wasmBinaryPath = origWasm; face = { modelAssetPath: FACE_MODEL }; hair = { modelAssetPath: HAIR_MODEL };
+      await attempt();
+    }
     mpMode = 'VIDEO';
   })();
   mpLoading.catch(() => { mpLoading = null; }); // 받기에 실패하면 다음에 다시 시도
@@ -321,31 +385,36 @@ function runSegmentation(blend) {
 let stream = null;
 const video = document.createElement('video'); video.playsInline = true; video.muted = true; video.setAttribute('playsinline', '');
 async function startCamera() {
-  state.mode = 'camera'; state.mirror = true; focus = null; renderUI();
+  const my = ++runId;
+  state.mode = 'camera'; state.mirror = true; state.ready = false; focus = null; renderUI();
   showError(null);
   try {
     if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('이 브라우저는 카메라를 지원하지 않아요.'), { name: 'NotSupported' });
     const camP = navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
     const [s] = await Promise.all([camP, loadModels()]);
+    if (my !== runId) { s.getTracks().forEach(t => t.stop()); return; } // 기다리는 동안 뒤로 갔으면 카메라를 바로 꺼요
     stream = s; video.srcObject = s; await video.play();
     await setMpMode('VIDEO');
+    if (my !== runId) { stopCamera(); return; }
     const tex = new THREE.VideoTexture(video); tex.minFilter = tex.magFilter = THREE.LinearFilter; tex.generateMipmaps = false;
     setSource({ el: video, w: video.videoWidth, h: video.videoHeight, tex, kind: 'video' });
-    setLoading(false);
+    setLoading(false); state.ready = true; showCoach();
   } catch (e) {
+    if (my !== runId) return;
     setLoading(false);
     const msg = e.name === 'NotAllowedError' ? '카메라 권한이 꺼져 있어요. 브라우저 주소창의 카메라 설정에서 허용해 주세요.'
       : e.name === 'NotFoundError' ? '이 기기에서 카메라를 찾지 못했어요.'
       : e.name === 'NotSupported' ? e.message : '카메라를 켜지 못했어요. (' + (e.message || e.name) + ')';
-    showError(msg);
+    showError(msg, '카메라를 쓸 수 없어요');
   }
 }
 function stopCamera() { if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; } }
 
 // ── 입력: 사진 ───────────────────────────────────────────
 async function startPhoto(i = state.photoIdx, file = null) {
+  const my = ++runId;
   stopCamera();
-  state.mode = 'photo'; state.mirror = false; state.photoIdx = i; renderUI();
+  state.mode = 'photo'; state.mirror = false; state.photoIdx = i; state.ready = false; renderUI();
   showError(null);
   try {
     const img = new Image(); img.crossOrigin = 'anonymous';
@@ -355,6 +424,7 @@ async function startPhoto(i = state.photoIdx, file = null) {
     await Promise.all([img.decode(), loadModels()]);
     setLoading(true, '얼굴과 머리카락을 찾고 있어요');
     await setMpMode('IMAGE');
+    if (my !== runId) return; // 기다리는 동안 다른 사진을 골랐거나 뒤로 갔어요
     const tex = new THREE.Texture(img); tex.minFilter = tex.magFilter = THREE.LinearFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
     const t0 = performance.now();
     const r = landmarker.detect(img);
@@ -368,14 +438,17 @@ async function startPhoto(i = state.photoIdx, file = null) {
       applyPose(r.facialTransformationMatrixes[0].data, 0, false);
       estimateLight(lm); setFaceRegion(lm);
       head.visible = true; state.faceSeen++; state.lastFaceT = performance.now();
+      startGrow();
     } else { focus = null; head.visible = false; }
     runSegmentation(false);
     layout(); renderUI();
     setLoading(false);
     dirty = true; state.ready = true;
+    if (head.visible) showCoach();
   } catch (e) {
+    if (my !== runId) return;
     console.error(e); setLoading(false);
-    showError('사진을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.');
+    showError(file ? '이 사진 형식은 열 수 없어요. JPG나 PNG 사진으로 다시 골라 주세요.' : '인터넷 연결을 확인하고 다시 눌러 주세요.', '사진을 불러오지 못했어요', 'photo');
   }
 }
 
@@ -398,6 +471,7 @@ function loop(now) {
     if (state.mode === 'camera' && state.fps < 22 && renderer.getPixelRatio() > 1) { if (++slowSec >= 3) { renderer.setPixelRatio(Math.max(1, renderer.getPixelRatio() - 0.5)); layout(); slowSec = 0; } }
     else slowSec = 0;
   }
+  stepGrow();
   if (!src) return;
   if (state.mode === 'camera' && landmarker && mpMode === 'VIDEO' && video.readyState >= 2 && video.currentTime !== lastVideoT) {
     lastVideoT = video.currentTime;
@@ -406,7 +480,7 @@ function loop(now) {
     state.faceMs = Math.round(performance.now() - t0);
     if (r.faceLandmarks.length) {
       applyPose(r.facialTransformationMatrixes[0].data, now / 1000, true);
-      if (!head.visible) state.faceSeen++;
+      if (!head.visible) { state.faceSeen++; if (state.faceSeen === 1) startGrow(); }
       head.visible = true; state.lastFaceT = now;
       if (++lightTick % 15 === 1) estimateLight(r.faceLandmarks[0]);
       setFaceRegion(r.faceLandmarks[0]);
@@ -455,11 +529,14 @@ requestAnimationFrame(loop);
 // ── 촬영 ─────────────────────────────────────────────────
 let lastShot = null;
 function capture() {
+  stepGrow(true); // 나타나는 중이면 다 보인 상태로 찍어요
   draw();
-  const out = document.createElement('canvas'); out.width = canvas.width; out.height = canvas.height;
+  // 화면에서 실제로 보이던 부분(아래 가발 목록 시트에 가린 곳 빼고)만 저장해요
+  const visH = Math.max(0.5, 1 - ($('#sheet').offsetHeight - 24) / Math.max(1, stage.clientHeight));
+  const out = document.createElement('canvas'); out.width = canvas.width; out.height = Math.round(canvas.height * visH);
   const g = out.getContext('2d');
   if (state.mirror) { g.translate(out.width, 0); g.scale(-1, 1); }
-  g.drawImage(canvas, 0, 0);
+  g.drawImage(canvas, 0, 0, canvas.width, out.height, 0, 0, out.width, out.height);
   g.setTransform(1, 0, 0, 1, 0, 0);
   const k = out.width / 390;
   g.font = `600 ${Math.round(12 * k)}px Pretendard, system-ui, sans-serif`;
@@ -467,7 +544,15 @@ function capture() {
   g.fillText('제안용 데모 · 예시', 14 * k, out.height - 14 * k);
   lastShot = out.toDataURL('image/jpeg', 0.92);
   $('#shot-img').src = lastShot;
-  go('result');
+  // 찍은 가발·색·사진을 결과 위에 작게 적어요
+  const st = STYLES[state.styleIdx], meta = [st.name, COLOR_NAMES[state.colorIdx]];
+  if (state.mode === 'photo') meta.push(state.credit ? `예시 사진 ${state.credit.label}` : '내 사진');
+  else if (Math.abs(state.yaw) >= 4) meta.push(`고개 ${Math.round(Math.abs(state.yaw))}°`);
+  $('#shot-meta').innerHTML = meta.map(t => `<span>${t}</span>`).join('');
+  // 셔터 반응: 화면이 한 번 하얗게 번쩍이고(안드로이드는 짧은 진동), 결과 화면으로 넘어가요
+  const fl = $('#flash'); fl.classList.remove('on'); void fl.offsetWidth; fl.classList.add('on');
+  if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(12);
+  setTimeout(() => go('result'), 170);
 }
 async function saveShot() {
   if (!lastShot) return;
@@ -484,14 +569,29 @@ async function saveShot() {
 // ── 화면 전환과 UI ────────────────────────────────────────
 function go(name) {
   document.querySelectorAll('.screen').forEach(s => s.hidden = s.id !== 'scr-' + name);
+  $('.phone').dataset.screen = name; // 체험 화면에서는 알림(토스트)을 셔터 위에 띄워요
   if (name === 'try') requestAnimationFrame(layout);
+  if (hero) { if (name === 'start' && !document.hidden) hero.start(); else hero.stop(); }
 }
 function setLoading(on, title = '', sub = '') {
   const el = $('#loading'); el.hidden = !on;
-  if (on) { $('#loading-title').textContent = title; $('#loading-sub').textContent = sub; }
+  if (on) { $('#loading-title').textContent = title; $('#loading-sub').textContent = sub; $('#loading-prog').hidden = true; $('#loading-spin').hidden = false; }
 }
-function showError(msg) {
-  const el = $('#error'); el.hidden = !msg; if (msg) $('#error-msg').textContent = msg;
+// 받은 양을 막대와 숫자로(예: 6.2 / 15.7MB)
+function setProgress(k, got, total) {
+  $('#loading-spin').hidden = true; $('#loading-prog').hidden = false;
+  $('#loading-bar').style.transform = `scaleX(${Math.min(1, Math.max(0.02, k)).toFixed(3)})`;
+  $('#loading-sub').textContent = `처음 한 번만 받아요 · ${(got / 1e6).toFixed(1)} / ${(total / 1e6).toFixed(1)}MB`;
+}
+// kind: 'camera'(카메라 못 씀 → 사진으로) / 'photo'(사진 못 불러옴 → 다시 불러오기)
+let errKind = 'camera';
+function showError(msg, title = '카메라를 쓸 수 없어요', kind = 'camera') {
+  const el = $('#error'); el.hidden = !msg;
+  if (!msg) return;
+  errKind = kind;
+  $('#error-title').textContent = title; $('#error-msg').textContent = msg;
+  $('#btn-error-photo').textContent = kind === 'photo' ? '다시 불러오기' : '사진으로 해 보기';
+  $('#btn-error-retry').textContent = kind === 'photo' ? '카메라로 해 보기' : '카메라 다시 켜기';
 }
 let toastT = 0;
 function toast(msg) { const el = $('#toast'); el.textContent = msg; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 2200); }
@@ -507,7 +607,7 @@ function renderUI() {
     const b = document.createElement('button');
     b.className = 'wig'; b.type = 'button'; b.setAttribute('aria-pressed', String(i === state.styleIdx));
     b.innerHTML = `<span class="wig-thumb">${THUMBS[s.id]}</span><span class="wig-name">${s.name}</span>`;
-    b.onclick = () => { state.styleIdx = i; applyStyle(); };
+    b.onclick = () => selectWig(i);
     list.appendChild(b);
   });
   // 색
@@ -540,16 +640,15 @@ function renderYaw() {
   const loading = !$('#loading').hidden || !$('#error').hidden;
   const hint = src && !has && !loading ? (state.mode === 'photo' ? '이 사진에서는 얼굴을 찾지 못했어요' : '얼굴을 화면 가운데에 맞춰 주세요') : '';
   $('#hint').hidden = !hint; $('#hint').textContent = hint;
+  if (hint && !$('#coach').hidden) hideCoach();
 }
 function renderDebug() {
   if (!state.debug) return;
-  const l2 = [];
-  if (state.faceMs != null) l2.push(`얼굴 ${state.faceMs}ms`);
-  if (state.dim && state.segMs != null) l2.push(`머리 ${state.segMs}ms`);
-  const l3 = [];
-  if (state.strands) l3.push(`${(state.strands / 1000).toFixed(1)}천 가닥`);
-  if (state.delegate) l3.push(state.delegate);
-  $('#debug').innerHTML = [`${state.fps ?? '-'} fps`, l2.join(' · '), l3.join(' · ')].filter(Boolean).join('<br>');
+  // 한 줄로: 속도 · (카메라일 때) 얼굴 추적 시간 · 가닥 수. 사진은 한 번만 재는 시간이라 빼요.
+  const parts = [`${state.fps ?? '-'} fps`];
+  if (state.mode === 'camera' && state.faceMs != null) parts.push(`추적 ${state.faceMs}ms`);
+  if (state.strands) parts.push(`${(state.strands / 1000).toFixed(1)}천 가닥`);
+  $('#debug').textContent = parts.join(' · ');
 }
 
 // 가발 미리보기 아이콘 (선 1.8px 한 세트)
@@ -561,19 +660,90 @@ const THUMBS = {
   bob: `<svg viewBox="0 0 56 56" aria-hidden="true"><path d="M13.5 40c-.4-4 .2-8 1-12C16 19.6 21.4 14 28 14s12 5.6 13.5 14c.8 4 1.4 8 1 12-2 1.8-4.6 2.4-7 1.6 1.6-2 2-4.4 1.6-7H18.9c-.4 2.6 0 5 1.6 7-2.4.8-5 .2-7-1.6z" fill="var(--hair)"/>${HEAD_SVG}<path d="M16 30c.4-9.4 5.4-14.4 12-14.4S39.6 20.6 40 30c-1.6-3.6-3.8-6-6.6-7.2-1.4 2-4 3-6.4 3s-5-.6-6.6-2.4C18.6 24.6 17 27 16 30z" fill="var(--hair)"/></svg>`,
 };
 
+// ── 가발 고르기: 목록·성별 탭·화면 밀기·방향키 ─────────────────────
+function selectWig(i, { announce = false } = {}) {
+  if (i === state.styleIdx) return;
+  state.styleIdx = i; state.gender = STYLES[i].gender;
+  applyStyle({ grow: true });
+  if (announce) toast(`${STYLES[i].name} · ${COLOR_NAMES[state.colorIdx]}`);
+  hideCoach();
+}
+function stepWig(d) { const n = STYLES.length; selectWig((state.styleIdx + d + n) % n, { announce: true }); }
+// 체험 화면을 좌우로 밀면 다음·이전 가발로 바뀌어요(셀카 앱처럼 한 손으로)
+let swipe = null;
+stage.addEventListener('pointerdown', e => { swipe = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+stage.addEventListener('pointerup', e => {
+  if (!swipe) return;
+  const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y, dt = performance.now() - swipe.t; swipe = null;
+  if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.4 && dt < 900) stepWig(dx < 0 ? 1 : -1);
+});
+stage.addEventListener('pointercancel', () => { swipe = null; });
+// 처음 한 번만: 밀어서 바꾸는 법 알려 주기
+let coachShown = false, coachT = 0;
+function showCoach() {
+  if (coachShown || state.compare) return;
+  coachShown = true; $('#coach').hidden = false;
+  coachT = setTimeout(hideCoach, 3800);
+}
+function hideCoach() { clearTimeout(coachT); $('#coach').hidden = true; }
+
+// ── 시작 화면 3D 미리보기 ─────────────────────────────────────
+const HERO_ORDER = ['long', 'bob', 'dandy', 'part'];
+let hero = null;
+try { hero = createHero({ canvas: $('#hero-gl'), getWig: wigFor, onYaw: renderHeroYaw }); } catch (e) { console.warn('3D 미리보기 끔', e); hero = null; }
+if (!hero) $('#hero').hidden = true;
+HERO_ORDER.forEach(id => {
+  const i = STYLES.findIndex(s => s.id === id);
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'hero-chip'; b.dataset.i = i; b.textContent = STYLES[i].name;
+  b.onclick = () => {
+    if (i === state.styleIdx) return;
+    state.styleIdx = i; state.gender = STYLES[i].gender;
+    renderHeroUI(); // 누른 칩부터 바로 바꿔 보여 주고, 가발 만들기는 다음 프레임에
+    requestAnimationFrame(() => setTimeout(() => { if (state.styleIdx === i) applyStyle(); }, 0));
+  };
+  $('#hero-chips').appendChild(b);
+});
+// 첫 화면이 뜬 뒤 쉬는 틈에 나머지 가발을 미리 만들어 둬요 → 칩·화면 밀기로 바꿀 때 바로 바뀌어요
+const idle = window.requestIdleCallback ? cb => requestIdleCallback(cb, { timeout: 1500 }) : cb => setTimeout(cb, 400);
+setTimeout(function prebuild() {
+  const next = STYLES.find(s => !wigCache.has(s.id));
+  if (!next) return;
+  idle(() => { wigFor(next); setTimeout(prebuild, 700); });
+}, 2000);
+function renderHeroUI() {
+  document.querySelectorAll('.hero-chip').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.i === state.styleIdx)));
+  $('#hero-meta').textContent = `${(state.strands / 1000).toFixed(1)}천 가닥 · 실시간 3D`;
+}
+let heroYawShown = null;
+function renderHeroYaw(y) {
+  const a = Math.round(Math.abs(y));
+  if (a === heroYawShown) return; heroYawShown = a;
+  $('#hero-yaw-text').textContent = a < 4 ? '정면 0°' : `고개 ${a}°`;
+  $('#hero-yaw-dot').style.left = `${50 + Math.max(-1.1, Math.min(1.1, y / 60)) * 43}%`;
+  $('#hero-yaw').classList.toggle('side', a >= 40);
+}
+$('#hero').addEventListener('hero-interact', () => $('#hero-hint').classList.add('used'));
+// 화면 밖이거나 다른 탭이면 미리보기를 멈춰 배터리를 아껴요
+if (hero) {
+  new IntersectionObserver(([en]) => { if (en.isIntersecting && !$('#scr-start').hidden && !document.hidden) hero.start(); else hero.stop(); }).observe($('#hero'));
+  document.addEventListener('visibilitychange', () => { if (document.hidden) hero.stop(); else if (!$('#scr-start').hidden) hero.start(); });
+}
+
 // ── 이벤트 ───────────────────────────────────────────────
+// 사진을 직접 고른 적이 없으면 고른 가발에 맞는 예시 사진으로 시작해요(남성 가발 → 정면, 여성 가발 → 옆 30°)
+const photoForStyle = () => state.photoPicked && state.photoIdx >= 0 ? state.photoIdx : (STYLES[state.styleIdx].gender === 'm' ? 0 : 2);
 $('#btn-camera').onclick = () => { go('try'); startCamera(); };
-$('#btn-photo').onclick = () => { go('try'); startPhoto(state.photoIdx >= 0 ? state.photoIdx : 2); };
-$('#btn-back').onclick = () => { stopCamera(); src = null; head.visible = false; state.mode = null; go('start'); };
-$('#btn-error-photo').onclick = () => startPhoto(2);
+$('#btn-photo').onclick = () => { go('try'); startPhoto(photoForStyle()); };
+$('#btn-back').onclick = () => { runId++; stopCamera(); src = null; head.visible = false; state.mode = null; state.ready = false; setLoading(false); showError(null); hideCoach(); go('start'); };
+$('#btn-error-photo').onclick = () => startPhoto(errKind === 'photo' && state.photoIdx >= 0 ? state.photoIdx : photoForStyle());
 $('#btn-error-retry').onclick = () => startCamera();
 document.querySelectorAll('[data-gender]').forEach(b => b.onclick = () => {
-  state.gender = b.dataset.gender;
-  if (STYLES[state.styleIdx].gender !== state.gender) { state.styleIdx = STYLES.findIndex(s => s.gender === state.gender); applyStyle(); }
-  else renderUI();
+  if (STYLES[state.styleIdx].gender !== b.dataset.gender) selectWig(STYLES.findIndex(s => s.gender === b.dataset.gender));
+  else { state.gender = b.dataset.gender; renderUI(); }
 });
 document.querySelectorAll('.swatch').forEach((b, i) => b.onclick = () => { state.colorIdx = i; applyStyle(); });
-document.querySelectorAll('.photo-pick').forEach(b => b.onclick = () => startPhoto(+b.dataset.i));
+document.querySelectorAll('.photo-pick').forEach(b => b.onclick = () => { state.photoPicked = true; startPhoto(+b.dataset.i); });
 $('#file').onchange = e => { const f = e.target.files?.[0]; if (f) { state.photoIdx = -1; startPhoto(-1, f); } e.target.value = ''; };
 $('#btn-dim').onclick = () => {
   state.dim = !state.dim;
@@ -594,7 +764,13 @@ const openSheet = id => { $(id).hidden = false; $(id).querySelector('.modal-shee
 const closeSheets = () => document.querySelectorAll('.modal').forEach(m => m.hidden = true);
 document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openSheet(b.dataset.open));
 document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e => { if (e.target === m || e.target.closest('[data-close]')) closeSheets(); }));
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheets(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeSheets(); return; }
+  // PC: 체험 화면에서 ← → 키로 가발 바꾸기(설정 슬라이더·탭에 초점이 있을 때는 빼요)
+  if ($('#scr-try').hidden || [...document.querySelectorAll('.modal')].some(m => !m.hidden)) return;
+  if (e.target.closest?.('input, [role="tablist"]')) return;
+  if (e.key === 'ArrowRight') stepWig(1); else if (e.key === 'ArrowLeft') stepWig(-1);
+});
 $('#sw-debug').onchange = e => { state.debug = e.target.checked; renderUI(); renderDebug(); };
 $('#sw-mesh').onchange = e => { state.mesh = e.target.checked; renderUI(); };
 $('#fit').oninput = e => {
@@ -613,7 +789,7 @@ if (params.get('mode') === 'photo') { go('try'); startPhoto(params.get('src') ? 
 if (params.get('mode') === 'camera') { go('try'); startCamera(); }
 
 // 헤드리스 확인용
-window.__app = { renderer, camera, strandMat, canvas, state, startPhoto, applyStyle, STYLES, capture, setDim: v => { state.dim = v; if (v && src) runSegmentation(false); renderUI(); }, redraw: () => { dirty = true; }, bench };
+window.__app = { renderer, camera, strandMat, canvas, state, startPhoto, applyStyle, STYLES, capture, hero, selectWig, stepWig, setDim: v => { state.dim = v; if (v && src) runSegmentation(false); renderUI(); }, redraw: () => { dirty = true; }, bench };
 // 렌더 시간 재기(헤드리스 확인용): n번 그리고 1px 읽기로 GPU가 끝날 때까지 기다려 프레임당 ms를 돌려줘요.
 function bench(n = 30) {
   const gl = renderer.getContext(), px = new Uint8Array(4);

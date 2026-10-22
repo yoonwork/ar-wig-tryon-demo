@@ -450,7 +450,7 @@ void main(){
   vAux = haux; vEdge = edge; vCb = hnrm.w * 1.6; vExt = hext.yzw; vSide = side; vPx = drawPx;
 }`;
 const STRAND_FS = /* glsl */`
-uniform vec3 uColor; uniform vec3 uLightDir; uniform float uExposure; uniform float uAmb; uniform float uOpacity;
+uniform vec3 uColor; uniform vec3 uLightDir; uniform float uExposure; uniform float uAmb; uniform float uOpacity; uniform float uGrow;
 varying vec3 vT; varying vec3 vN; varying vec3 vV; varying vec4 vAux; varying float vCov; varying float vEdge; varying float vCb; varying vec3 vExt; varying float vSide; varying float vPx;
 float kk(vec3 T, vec3 H, float e){ float d = dot(T, H); return pow(sqrt(max(0.0, 1.0 - d * d)), e); }
 float hash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -482,6 +482,7 @@ void main(){
   col += (s1 * 0.15 + s2 * 0.5 * glint * warm) * occ * occ * rnd * smoothstep(0.02, 0.2, t);
   col *= uExposure;
   float a = vCov * am * uOpacity;
+  a *= 1.0 - smoothstep(uGrow - 0.14, uGrow, t);                     // 가발을 바꿀 때 뿌리에서 끝으로 머리카락이 흘러내리며 나타나요
   a *= 1.0 - smoothstep(0.45, 1.0, abs(vSide)) * vExt.z;              // 바탕 띠는 가장자리를 흐리게
   a *= mix(1.0, 1.0 - 0.5 * smoothstep(0.55, 1.0, abs(vSide)), smoothstep(1.6, 3.2, vPx)); // 굵게 보이는 가닥은 가장자리를 부드럽게(선 느낌 줄이기)
   a *= mix(1.0, smoothstep(0.0, 0.18, t) * 0.8 + 0.2, vEdge);         // 헤어라인 뿌리는 옅게 → 이마와 섞임
@@ -493,7 +494,7 @@ void main(){
 
 export function strandMaterial() {
   return new THREE.ShaderMaterial({
-    uniforms: { uColor: { value: new THREE.Color('#241b16') }, uRes: { value: new THREE.Vector2(1, 1) }, uWidth: { value: 0.075 }, uOpacity: { value: 1 }, ...LIGHT },
+    uniforms: { uColor: { value: new THREE.Color('#241b16') }, uRes: { value: new THREE.Vector2(1, 1) }, uWidth: { value: 0.075 }, uOpacity: { value: 1 }, uGrow: { value: 2 }, ...LIGHT },
     vertexShader: STRAND_VS, fragmentShader: STRAND_FS,
     side: THREE.DoubleSide, transparent: true, blending: THREE.NoBlending, alphaToCoverage: true, depthWrite: true,
   });
@@ -559,6 +560,19 @@ function occlusion(grid, p, n, R = 2.4) {
     occ += Math.pow(1 - dist / R, 2) * (0.55 + 0.45 * Math.max(0, d.y / dist + 0.3));
   });
   return Math.min(0.85, 1 - Math.exp(-occ * 0.035));
+}
+
+// 다른 몸체(시작 화면 마네킹 등)의 꼭짓점마다 머리카락이 얼마나 덮는지(0~0.85) — 얼굴 그림자와 같은 계산
+export function hairShade(wig, positions, normals, R = 2.6, minY = -16) {
+  // 가이드 점을 절반만 써도 그림자 모양은 같아요(계산 시간 절반). 바탕색으로 사라지는 목 아래는 건너뛰어요.
+  const grid = gridOf(wig.guidePts.filter((_, i) => i % 2 === 0), 2.4);
+  const out = new Float32Array(positions.length / 3), p = V(), n = V();
+  for (let i = 0; i < out.length; i++) {
+    if (positions[i * 3 + 1] < minY) continue;
+    p.fromArray(positions, i * 3); n.fromArray(normals, i * 3);
+    out[i] = Math.min(0.85, occlusion(grid, p, n, R) * 1.6);
+  }
+  return out;
 }
 
 export function buildCapAndShadow(wig) {
